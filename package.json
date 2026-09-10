@@ -1,0 +1,22 @@
+{
+  "name": "spotify-jam-web",
+  "version": "1.0.0",
+  "description": "Collaborative Spotify music picker webapp for guests without Spotify accounts",
+  "scripts": {
+    "install:server": "cd server && npm install",
+    "install:client": "cd client && npm install",
+    "install:all": "npm run install:server && npm run install:client",
+    "build": "cd client && npm run build",
+    "start": "node server/server.js",
+    "dev": "node server/server.js"
+  },
+  "keywords": [
+    "spotify",
+    "jam",
+    "music-picker",
+    "jukebox",
+    "party"
+  ],
+  "author": "",
+  "license": "ISC"
+}
