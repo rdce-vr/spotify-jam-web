@@ -19,7 +19,7 @@ FROM node:22-alpine
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV PORT=5000
+ENV PORT=37685
 
 # Install production dependencies for server
 WORKDIR /app/server
@@ -34,7 +34,7 @@ WORKDIR /app
 COPY --from=client-builder /app/client/dist ./client/dist
 
 # Expose web server port
-EXPOSE 5000
+EXPOSE 37685
 
 # Start server
 WORKDIR /app/server

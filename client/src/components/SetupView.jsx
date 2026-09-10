@@ -119,7 +119,7 @@ export function SetupView({ onConfigured }) {
             <li>
               Under <strong>Redirect URIs</strong>, add this exact URL:
               <div className="font-mono text-[11px] bg-black/60 text-spotify-green p-1.5 rounded mt-1 select-all break-all border border-white/5">
-                {redirectUri || 'http://127.0.0.1:5000/api/auth/callback'}
+                {redirectUri || 'http://127.0.0.1:37685/api/auth/callback'}
               </div>
               <p className="text-[10px] text-neutral-400 mt-1">
                 💡 <strong>Cloudflare Tunnel:</strong> You can add multiple Redirect URIs in Spotify! If using a tunnel or custom domain (e.g. <code>https://party.yourdomain.com</code>), also add <code>https://party.yourdomain.com/api/auth/callback</code>.

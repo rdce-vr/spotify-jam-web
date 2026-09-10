@@ -8,11 +8,11 @@ export default defineConfig({
     host: '0.0.0.0', // Allow connections from phones on local WiFi
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:5000',
+        target: 'http://127.0.0.1:37685',
         changeOrigin: true
       },
       '/socket.io': {
-        target: 'http://127.0.0.1:5000',
+        target: 'http://127.0.0.1:37685',
         ws: true
       }
     }

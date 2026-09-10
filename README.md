@@ -37,7 +37,7 @@ All music plays directly on the host's active Spotify device (Laptop, Phone, Sma
 2. Click **Create App**.
    - **App name**: `Party Jam` (or anything you like)
    - **App description**: `Music picker for guests`
-   - **Redirect URIs**: `http://127.0.0.1:5000/api/auth/callback`
+   - **Redirect URIs**: `http://127.0.0.1:37685/api/auth/callback`
    - **Which API/SDKs are you planning to use?**: Select **Web API**.
 3. Save the app and copy your **Client ID** and **Client Secret**.
 
@@ -50,7 +50,7 @@ npm start
 ```
 
 Then open your browser to:
-👉 **`http://127.0.0.1:5000`**
+👉 **`http://127.0.0.1:37685`**
 
 - If first time, enter your `Client ID` and `Client Secret` into the friendly setup form and click **Save Configuration**.
 - Click **Start Party (Login with Spotify)**.
@@ -77,13 +77,13 @@ You can run the application either using **Docker Compose** or directly using th
 2. **Run the container**:
    ```bash
    # On Windows PowerShell:
-   docker run -d -p 5000:5000 -v ${PWD}/server/.env:/app/server/.env --name spotify-jam spotify-jam-web
+   docker run -d -p 37685:37685 -v ${PWD}/server/.env:/app/server/.env --name spotify-jam spotify-jam-web
 
    # On Linux/macOS:
-   docker run -d -p 5000:5000 -v $(pwd)/server/.env:/app/server/.env --name spotify-jam spotify-jam-web
+   docker run -d -p 37685:37685 -v $(pwd)/server/.env:/app/server/.env --name spotify-jam spotify-jam-web
    ```
 
-3. Open `http://127.0.0.1:5000` in your browser!
+3. Open `http://127.0.0.1:37685` in your browser!
 
 *(Note: If you prefer passing Spotify credentials directly via flags instead of mounting `.env`, add `-e SPOTIFY_CLIENT_ID="..." -e SPOTIFY_CLIENT_SECRET="..."` to the `docker run` command).*
 
@@ -120,12 +120,12 @@ Look for the link ending in `.trycloudflare.com` (e.g. `https://your-party-name.
 
 **Without Docker (Using cloudflared binary):**
 ```bash
-cloudflared tunnel --url http://127.0.0.1:5000
+cloudflared tunnel --url http://127.0.0.1:37685
 ```
 
 ### Method 2: Cloudflare Named Tunnel (Using Your Own Domain)
 If you manage your domain on Cloudflare Zero Trust:
-1. In Cloudflare Zero Trust Dashboard, create a tunnel pointing to `http://spotify-jam:5000` (or `http://127.0.0.1:5000`).
+1. In Cloudflare Zero Trust Dashboard, create a tunnel pointing to `http://spotify-jam:37685` (or `http://127.0.0.1:37685`).
 2. Add your tunnel token to `.env`:
    ```bash
    CLOUDFLARE_TUNNEL_TOKEN="your_token_here"
@@ -138,7 +138,7 @@ If you manage your domain on Cloudflare Zero Trust:
 
 ### Important: Spotify Developer Dashboard Configuration
 When using Cloudflare Tunnel, make sure to add both URLs under **Redirect URIs** in your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard):
-- `http://127.0.0.1:5000/api/auth/callback` (for local access)
+- `http://127.0.0.1:37685/api/auth/callback` (for local access)
 - `https://your-tunnel-url.com/api/auth/callback` (for public internet access)
 
 The server automatically detects whether you're accessing locally or through Cloudflare Tunnel and uses the matching callback and QR code links!

@@ -22,7 +22,7 @@ const {
 } = require('./spotifyService');
 const RoomManager = require('./roomManager');
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 37685;
 const CLIENT_PORT = process.env.CLIENT_PORT || 3000;
 
 // Mutable configuration

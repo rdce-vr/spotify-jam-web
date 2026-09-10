@@ -7,9 +7,9 @@ services:
     container_name: spotify-jam-web
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "37685:37685"
     environment:
-      - PORT=5000
+      - PORT=37685
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
       - REDIRECT_URI=${REDIRECT_URI:-}
@@ -39,7 +39,7 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: spotify-jam-quick-tunnel
     restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://spotify-jam:5000
+    command: tunnel --no-autoupdate --url http://spotify-jam:37685
     depends_on:
       - spotify-jam
     profiles:
