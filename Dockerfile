@@ -1,7 +1,7 @@
 # ==========================================
 # Stage 1: Build Frontend (Vite + React)
 # ==========================================
-FROM node:22-alpine AS client-builder
+FROM node:lts-alpine AS client-builder
 
 WORKDIR /app/client
 
@@ -14,7 +14,7 @@ RUN npm run build
 # ==========================================
 # Stage 2: Production Server Runtime
 # ==========================================
-FROM node:22-alpine
+FROM node:lts-alpine
 
 WORKDIR /app
 

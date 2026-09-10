@@ -29,7 +29,7 @@ All music plays directly on the host's active Spotify device (Laptop, Phone, Sma
 ## 🚀 Quick Start Guide
 
 ### 1. Requirements
-- Node.js (v18 or higher installed).
+- Node.js LTS (v20 or v22 LTS recommended).
 - Spotify Premium account (required by Spotify API for queue playback).
 
 ### 2. Setup Spotify Developer Credentials (2 Minutes)

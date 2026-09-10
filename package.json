@@ -17,6 +17,9 @@
     "jukebox",
     "party"
   ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "author": "",
   "license": "ISC"
 }
