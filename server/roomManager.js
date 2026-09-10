@@ -395,8 +395,13 @@ class RoomManager {
   broadcastRoomState(roomCode) {
     const room = this.getRoom(roomCode);
     if (!room || !this.io) return;
-    const state = this.getPublicState(room);
-    this.io.to(roomCode).emit('room_state', state);
+    const publicState = this.getPublicState(room);
+    const hostState = this.getHostState(room);
+
+    // Send public state to regular guests (excluding hosts)
+    this.io.to(roomCode).except(`${roomCode}_host`).emit('room_state', publicState);
+    // Send elevated state (with hostPin & hostSecret) to authenticated hosts
+    this.io.to(`${roomCode}_host`).emit('room_state', hostState);
   }
 
   startPoller() {

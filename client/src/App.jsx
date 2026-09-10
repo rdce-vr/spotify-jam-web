@@ -3,7 +3,7 @@ import { socket } from './socket';
 import SetupView from './components/SetupView';
 import HostView from './components/HostView';
 import GuestView from './components/GuestView';
-import { Music2, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
+import { Music2, ArrowRight, ArrowLeft, AlertCircle, Sparkles } from 'lucide-react';
 
 export function App() {
   const [status, setStatus] = useState(null);
@@ -20,6 +20,7 @@ export function App() {
   });
   const [roomCode, setRoomCode] = useState('');
   const [isHost, setIsHost] = useState(false);
+  const [previewAsGuest, setPreviewAsGuest] = useState(false);
   const [qrData, setQrData] = useState(null);
   const [nickname, setNickname] = useState(() => localStorage.getItem('jam_nickname') || 'Guest');
   const [joinInputCode, setJoinInputCode] = useState('');
@@ -34,6 +35,15 @@ export function App() {
       if (urlKey) return urlKey;
       if (match) {
         return localStorage.getItem(`jam_host_key_${match[1].toUpperCase()}`) || '';
+      }
+    } catch (e) {}
+    return '';
+  });
+  const [hostPin, setHostPin] = useState(() => {
+    try {
+      const match = window.location.pathname.match(/^\/room\/([A-Za-z0-9]+)/);
+      if (match) {
+        return localStorage.getItem(`jam_host_pin_${match[1].toUpperCase()}`) || '';
       }
     } catch (e) {}
     return '';
@@ -74,6 +84,11 @@ export function App() {
       } else if (hostParam) {
         setIsHost(true);
       }
+
+      const savedPin = localStorage.getItem(`jam_host_pin_${code}`);
+      if (savedPin) {
+        setHostPin(savedPin);
+      }
     }
 
     // Fetch server status (only required for setup/home page)
@@ -111,6 +126,10 @@ export function App() {
             localStorage.setItem(`jam_host_key_${roomCode}`, data.hostSecret);
             setIsHost(true);
           }
+          if (data.hostPin) {
+            setHostPin(data.hostPin);
+            localStorage.setItem(`jam_host_pin_${roomCode}`, data.hostPin);
+          }
           try {
             sessionStorage.setItem(`room_cache_${roomCode}`, JSON.stringify(data));
           } catch (e) {}
@@ -123,7 +142,8 @@ export function App() {
     };
 
     const emitJoin = () => {
-      socket.emit('join_room', { roomCode, nickname });
+      const activeKey = hostKey || localStorage.getItem(`jam_host_key_${roomCode}`);
+      socket.emit('join_room', { roomCode, nickname, hostKey: activeKey });
     };
 
     // 1. Immediately fetch fresh data over fast HTTP
@@ -167,7 +187,22 @@ export function App() {
 
     const handleRoomState = (state) => {
       if (!isMounted) return;
-      setRoom(state);
+      setRoom(prev => {
+        const merged = { ...prev, ...state };
+        if (state.hostPin) {
+          setHostPin(state.hostPin);
+          localStorage.setItem(`jam_host_pin_${roomCode}`, state.hostPin);
+        } else if (prev?.hostPin || hostPin) {
+          merged.hostPin = prev?.hostPin || hostPin;
+        }
+        if (state.hostSecret) {
+          setHostKey(state.hostSecret);
+          localStorage.setItem(`jam_host_key_${roomCode}`, state.hostSecret);
+        } else if (prev?.hostSecret || hostKey) {
+          merged.hostSecret = prev?.hostSecret || hostKey;
+        }
+        return merged;
+      });
       setError('');
       try {
         sessionStorage.setItem(`room_cache_${roomCode}`, JSON.stringify(state));
@@ -269,7 +304,15 @@ export function App() {
     if (data.hostKey) {
       setHostKey(data.hostKey);
       localStorage.setItem(`jam_host_key_${roomCode}`, data.hostKey);
+      if (data.hostPin) {
+        setHostPin(data.hostPin);
+        localStorage.setItem(`jam_host_pin_${roomCode}`, data.hostPin);
+      }
       setIsHost(true);
+      setPreviewAsGuest(false);
+
+      // Notify socket of host privilege
+      socket.emit('auth_host_socket', { roomCode, hostKey: data.hostKey });
 
       // Immediately refresh full room state with host privilege
       const roomRes = await fetch(`/api/room/${roomCode}`, {
@@ -290,7 +333,11 @@ export function App() {
   };
 
   const handleSwitchToGuest = () => {
-    setIsHost(false);
+    setPreviewAsGuest(true);
+  };
+
+  const handleBackToHost = () => {
+    setPreviewAsGuest(false);
   };
 
   // Playback Control Handlers
@@ -445,10 +492,11 @@ export function App() {
             <span>Reconnecting to session...</span>
           </div>
         )}
-        {isHost ? (
+        {isHost && !previewAsGuest ? (
           <HostView
             room={room}
             hostKey={hostKey}
+            hostPin={hostPin || room.hostPin}
             qrData={qrData}
             onReorder={handleReorder}
             onDeleteTrack={handleDeleteTrack}
@@ -463,15 +511,37 @@ export function App() {
             onSwitchToGuest={handleSwitchToGuest}
           />
         ) : (
-          <GuestView
-            room={room}
-            nickname={nickname}
-            setNickname={updateNickname}
-            onReorder={handleReorder}
-            onDeleteTrack={handleDeleteTrack}
-            onAddTrack={handleAddTrack}
-            onHostLogin={handleHostLogin}
-          />
+          <div>
+            {isHost && previewAsGuest && (
+              <div className="sticky top-0 z-40 bg-neutral-900/95 border-b border-spotify-green/40 px-4 py-2.5 shadow-xl backdrop-blur-md">
+                <div className="max-w-md mx-auto flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-spotify-green animate-pulse" />
+                    <div>
+                      <span className="text-xs font-bold text-white tracking-wide block">Guest Preview Mode</span>
+                      <span className="text-[10px] text-spotify-subtext block">Viewing room as a party attendee</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleBackToHost}
+                    className="flex items-center gap-1.5 bg-spotify-green hover:bg-spotify-green-hover text-black font-bold text-xs px-3 py-1.5 rounded-full transition-transform active:scale-95 shadow-md shadow-spotify-green/20"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>Back to Host</span>
+                  </button>
+                </div>
+              </div>
+            )}
+            <GuestView
+              room={room}
+              nickname={nickname}
+              setNickname={updateNickname}
+              onReorder={handleReorder}
+              onDeleteTrack={handleDeleteTrack}
+              onAddTrack={handleAddTrack}
+              onHostLogin={isHost ? handleBackToHost : handleHostLogin}
+            />
+          </div>
         )}
       </div>
     );

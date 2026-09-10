@@ -559,7 +559,7 @@ io.on('connection', (socket) => {
   let currentRoom = null;
   let guestNickname = 'Guest';
 
-  socket.on('join_room', ({ roomCode, nickname }) => {
+  socket.on('join_room', ({ roomCode, nickname, hostKey }) => {
     if (!roomCode) return;
     const room = roomManager.getRoom(roomCode);
     if (!room) {
@@ -573,9 +573,26 @@ io.on('connection', (socket) => {
     socket.join(currentRoom);
     room.guests.set(socket.id, { name: guestNickname });
 
-    // Send full current room state immediately
-    socket.emit('room_state', roomManager.getPublicState(room));
+    const isHost = hostKey && roomManager.verifyHost(currentRoom, hostKey);
+    if (isHost) {
+      socket.join(`${currentRoom}_host`);
+      socket.emit('room_state', roomManager.getHostState(room));
+    } else {
+      socket.emit('room_state', roomManager.getPublicState(room));
+    }
     roomManager.broadcastRoomState(currentRoom);
+  });
+
+  socket.on('auth_host_socket', ({ roomCode, hostKey }) => {
+    if (!roomCode || !hostKey) return;
+    const code = roomCode.toUpperCase();
+    if (roomManager.verifyHost(code, hostKey)) {
+      socket.join(`${code}_host`);
+      const room = roomManager.getRoom(code);
+      if (room) {
+        socket.emit('room_state', roomManager.getHostState(room));
+      }
+    }
   });
 
   socket.on('reorder_queue', ({ roomCode, fromIndex, toIndex }) => {

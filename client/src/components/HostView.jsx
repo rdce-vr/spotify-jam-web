@@ -16,7 +16,8 @@ import {
   ShieldCheck,
   Key,
   ShieldAlert,
-  Smartphone
+  Smartphone,
+  Eye
 } from 'lucide-react';
 import NowPlaying from './NowPlaying';
 import QueueItem from './QueueItem';
@@ -25,6 +26,7 @@ import TrackCard from './TrackCard';
 export function HostView({
   room,
   hostKey,
+  hostPin,
   qrData,
   onReorder,
   onDeleteTrack,
@@ -38,6 +40,7 @@ export function HostView({
   actionLoading,
   onSwitchToGuest
 }) {
+  const effectivePin = hostPin || room.hostPin || '';
   const [devices, setDevices] = useState([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState(room.selectedDeviceId || '');
@@ -199,10 +202,10 @@ export function HostView({
                 <Users className="w-3.5 h-3.5" />
                 <span>{room.guestCount || 0} guest{room.guestCount === 1 ? '' : 's'}</span>
               </span>
-              {room.hostPin && (
+              {effectivePin && (
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(room.hostPin);
+                    navigator.clipboard.writeText(effectivePin);
                     setCopiedPin(true);
                     setTimeout(() => setCopiedPin(false), 2000);
                   }}
@@ -210,7 +213,7 @@ export function HostView({
                   className="flex items-center gap-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-md font-mono font-bold text-[11px] transition-colors"
                 >
                   <Key className="w-3 h-3 text-amber-400" />
-                  <span>PIN: {room.hostPin}</span>
+                  <span>PIN: {effectivePin}</span>
                   {copiedPin ? <Check className="w-3 h-3 text-emerald-400 ml-0.5" /> : <Copy className="w-2.5 h-2.5 opacity-60 ml-0.5" />}
                 </button>
               )}
@@ -223,9 +226,11 @@ export function HostView({
           {onSwitchToGuest && (
             <button
               onClick={onSwitchToGuest}
-              className="text-xs text-neutral-400 hover:text-white px-2.5 py-2 rounded-xl border border-white/10 hover:border-white/20 transition-colors hidden sm:inline-flex"
+              title="Preview party interface as a guest"
+              className="flex items-center gap-1.5 text-xs text-neutral-300 hover:text-white bg-neutral-900 hover:bg-neutral-800 px-3 py-2 rounded-xl border border-white/10 hover:border-white/20 transition-colors"
             >
-              Guest View
+              <Eye className="w-3.5 h-3.5 text-spotify-green" />
+              <span>Guest View</span>
             </button>
           )}
 
@@ -577,15 +582,15 @@ export function HostView({
                     </div>
 
                     {/* PIN Card */}
-                    {room.hostPin && (
+                    {effectivePin && (
                       <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-2.5 mb-3 flex items-center justify-between">
                         <div className="text-left pl-1">
                           <p className="text-[10px] text-amber-400/80 font-bold uppercase tracking-wider">Or Enter Host PIN</p>
-                          <p className="text-xl font-black font-mono text-white tracking-wider">{room.hostPin}</p>
+                          <p className="text-xl font-black font-mono text-white tracking-wider">{effectivePin}</p>
                         </div>
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(room.hostPin);
+                            navigator.clipboard.writeText(effectivePin);
                             setCopiedPin(true);
                             setTimeout(() => setCopiedPin(false), 2000);
                           }}
