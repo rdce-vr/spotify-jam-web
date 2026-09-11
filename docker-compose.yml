@@ -19,28 +19,3 @@ services:
       # Persists Spotify Developer App credentials across restarts
       - ./server/.env:/app/server/.env
 
-  # Cloudflare Named Tunnel (Using your Cloudflare Zero Trust Token)
-  # Run with: docker compose --profile tunnel up -d
-  cloudflare-tunnel:
-    image: cloudflare/cloudflared:latest
-    container_name: spotify-jam-cloudflare
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
-    depends_on:
-      - spotify-jam
-    profiles:
-      - tunnel
-
-  # Cloudflare Quick Tunnel (Free, instant https://*.trycloudflare.com URL with NO login or domain needed)
-  # Run with: docker compose --profile quick-tunnel up -d
-  cloudflare-quick:
-    image: cloudflare/cloudflared:latest
-    container_name: spotify-jam-quick-tunnel
-    restart: unless-stopped
-    command: tunnel --no-autoupdate --url http://spotify-jam:37685
-    depends_on:
-      - spotify-jam
-    profiles:
-      - quick-tunnel

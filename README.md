@@ -105,39 +105,25 @@ docker compose down
 
 Want friends to join from cellular data (5G/4G) or other locations without being on the same local Wi-Fi? You can expose the app securely using **Cloudflare Tunnel**.
 
-### Method 1: Cloudflare Quick Tunnel (Free, No Domain or Account Needed!)
-Cloudflare can automatically generate a secure `https://*.trycloudflare.com` public address for your party:
+### Method 1: Using an Existing Cloudflare Tunnel (Recommended)
+If you already have a Cloudflare Tunnel (`cloudflared`) running on your machine or network:
+1. Go to **Cloudflare Zero Trust Dashboard** → **Networks** → **Tunnels**.
+2. Select your active tunnel and go to the **Public Hostname** tab.
+3. Click **Add a public hostname**:
+   - **Service**: `HTTP`
+   - **URL**: `localhost:37685` (or `127.0.0.1:37685`)
+   - **Subdomain/Domain**: e.g., `jam.yourdomain.com`
+4. The server automatically detects requests coming through Cloudflare (`https://` and your domain), generating matching QR codes and join links dynamically.
 
-**With Docker Compose:**
-```bash
-docker compose --profile quick-tunnel up -d
-```
-Then view your public tunnel URL in the logs:
-```bash
-docker compose logs cloudflare-quick
-```
-Look for the link ending in `.trycloudflare.com` (e.g. `https://your-party-name.trycloudflare.com`).
-
-**Without Docker (Using cloudflared binary):**
+### Method 2: Cloudflare Quick Tunnel (Free, No Account Needed)
+If you just want a temporary public URL without setting up a domain:
 ```bash
 cloudflared tunnel --url http://127.0.0.1:37685
 ```
-
-### Method 2: Cloudflare Named Tunnel (Using Your Own Domain)
-If you manage your domain on Cloudflare Zero Trust:
-1. In Cloudflare Zero Trust Dashboard, create a tunnel pointing to `http://spotify-jam:37685` (or `http://127.0.0.1:37685`).
-2. Add your tunnel token to `.env`:
-   ```bash
-   CLOUDFLARE_TUNNEL_TOKEN="your_token_here"
-   PUBLIC_URL="https://party.yourdomain.com"
-   ```
-3. Run with Docker Compose:
-   ```bash
-   docker compose --profile tunnel up -d
-   ```
+Copy the generated `https://*.trycloudflare.com` URL and share it with your guests!
 
 ### Important: Spotify Developer Dashboard Configuration
-When using Cloudflare Tunnel, make sure to add both URLs under **Redirect URIs** in your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard):
+When accessing via Cloudflare Tunnel, make sure to add your public URL under **Redirect URIs** in your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard):
 - `http://127.0.0.1:37685/api/auth/callback` (for local access)
 - `https://your-tunnel-url.com/api/auth/callback` (for public internet access)
 
