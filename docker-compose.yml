@@ -16,6 +16,6 @@ services:
       - PUBLIC_URL=${PUBLIC_URL:-}
       - HOST_IP=${HOST_IP:-}
     volumes:
-      # Persists Spotify Developer App credentials across restarts
-      - ./server/.env:/app/server/.env
+      # Persists Spotify credentials and configuration cleanly across container rebuilds & restarts
+      - ./data:/app/data
 

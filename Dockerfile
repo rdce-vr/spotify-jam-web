@@ -20,6 +20,10 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=37685
+ENV DATA_DIR=/app/data
+
+# Persistent data directory
+RUN mkdir -p /app/data
 
 # Install production dependencies for server
 WORKDIR /app/server

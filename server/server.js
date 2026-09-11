@@ -1,10 +1,45 @@
 const path = require('path');
 const fs = require('fs');
-// Load .env explicitly from server directory or project root
-require('dotenv').config({ path: path.join(__dirname, '.env') });
-if (!process.env.SPOTIFY_CLIENT_ID) {
-  require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+// Persistent data & config paths
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+
+// Helper to safely load dotenv from a path (handling both files and docker directory bind-mounts)
+function loadDotEnvSafe(targetPath) {
+  try {
+    if (fs.existsSync(targetPath)) {
+      const stat = fs.statSync(targetPath);
+      if (stat.isDirectory()) {
+        // If Docker bind-mounted as a directory, check nested files inside it
+        const nestedFiles = ['.env', 'credentials.env', 'config.env'];
+        for (const file of nestedFiles) {
+          const nestedPath = path.join(targetPath, file);
+          if (fs.existsSync(nestedPath) && !fs.statSync(nestedPath).isDirectory()) {
+            require('dotenv').config({ path: nestedPath });
+          }
+        }
+      } else {
+        require('dotenv').config({ path: targetPath });
+      }
+    }
+  } catch (e) {}
 }
+
+// 1. Load from persistent data/config.json if available
+try {
+  if (fs.existsSync(CONFIG_FILE) && !fs.statSync(CONFIG_FILE).isDirectory()) {
+    const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    if (raw.clientId && !process.env.SPOTIFY_CLIENT_ID) process.env.SPOTIFY_CLIENT_ID = raw.clientId;
+    if (raw.clientSecret && !process.env.SPOTIFY_CLIENT_SECRET) process.env.SPOTIFY_CLIENT_SECRET = raw.clientSecret;
+    if (raw.redirectUri && !process.env.REDIRECT_URI) process.env.REDIRECT_URI = raw.redirectUri;
+  }
+} catch (e) {}
+
+// 2. Load .env safely from data dir, server dir, or project root
+loadDotEnvSafe(path.join(DATA_DIR, '.env'));
+loadDotEnvSafe(path.join(__dirname, '.env'));
+loadDotEnvSafe(path.join(__dirname, '..', '.env'));
 
 const express = require('express');
 const http = require('http');
@@ -138,6 +173,63 @@ app.get('/api/status', (req, res) => {
 });
 
 /**
+ * Safely persist credentials to data/config.json and .env
+ * Handled gracefully even if .env is a directory due to Docker bind-mounting
+ */
+function savePersistentConfig(clientId, clientSecret, redirectUri) {
+  // 1. Save to data/config.json
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({
+      clientId,
+      clientSecret,
+      redirectUri,
+      updatedAt: new Date().toISOString()
+    }, null, 2));
+  } catch (e) {
+    console.warn('Could not write data/config.json:', e.message);
+  }
+
+  // 2. Save to .env files (handling file vs directory cleanly)
+  const envContent = [
+    `SPOTIFY_CLIENT_ID=${clientId}`,
+    `SPOTIFY_CLIENT_SECRET=${clientSecret}`,
+    `PORT=${PORT}`,
+    redirectUri ? `REDIRECT_URI=${redirectUri}` : ''
+  ].filter(Boolean).join('\n') + '\n';
+
+  const targets = [
+    path.join(DATA_DIR, '.env'),
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '..', '.env')
+  ];
+
+  for (const target of targets) {
+    try {
+      if (fs.existsSync(target)) {
+        const stat = fs.statSync(target);
+        if (stat.isDirectory()) {
+          // Docker directory bind-mount: write inside the directory
+          fs.writeFileSync(path.join(target, 'credentials.env'), envContent);
+          fs.writeFileSync(path.join(target, '.env'), envContent);
+        } else {
+          fs.writeFileSync(target, envContent);
+        }
+      } else {
+        const parent = path.dirname(target);
+        if (fs.existsSync(parent) && fs.statSync(parent).isDirectory()) {
+          fs.writeFileSync(target, envContent);
+        }
+      }
+    } catch (err) {
+      console.warn(`Could not write to ${target}:`, err.message);
+    }
+  }
+}
+
+/**
  * Save / Update Spotify Credentials dynamically
  */
 app.post('/api/config', (req, res) => {
@@ -152,20 +244,7 @@ app.post('/api/config', (req, res) => {
 
   roomManager.updateCredentials(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET);
 
-  // Write to .env for persistence
-  const envContent = [
-    `SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}`,
-    `SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}`,
-    `PORT=${PORT}`,
-    `REDIRECT_URI=${REDIRECT_URI}`
-  ].join('\n');
-
-  try {
-    fs.writeFileSync(path.join(__dirname, '.env'), envContent);
-    fs.writeFileSync(path.join(__dirname, '..', '.env'), envContent);
-  } catch (err) {
-    console.warn('Could not write .env file:', err.message);
-  }
+  savePersistentConfig(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, REDIRECT_URI);
 
   res.json({ success: true, message: 'Configuration saved successfully' });
 });

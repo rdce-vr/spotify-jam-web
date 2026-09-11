@@ -77,10 +77,10 @@ You can run the application either using **Docker Compose** or directly using th
 2. **Run the container**:
    ```bash
    # On Windows PowerShell:
-   docker run -d -p 37685:37685 -v ${PWD}/server/.env:/app/server/.env --name spotify-jam spotify-jam-web
+   docker run -d -p 37685:37685 -v ${PWD}/data:/app/data --name spotify-jam spotify-jam-web
 
    # On Linux/macOS:
-   docker run -d -p 37685:37685 -v $(pwd)/server/.env:/app/server/.env --name spotify-jam spotify-jam-web
+   docker run -d -p 37685:37685 -v $(pwd)/data:/app/data --name spotify-jam spotify-jam-web
    ```
 
 3. Open `http://127.0.0.1:37685` in your browser!
