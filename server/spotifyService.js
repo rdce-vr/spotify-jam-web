@@ -28,6 +28,65 @@ function setRateLimitBackoff(seconds) {
   console.warn(`⚠️ [Spotify API Rate Limit] Quota exceeded. Pausing API calls for ${waitSec}s (cooldown until ${new Date(rateLimitedUntil).toLocaleTimeString()}).`);
 }
 
+// Rolling 30-second window request tracker
+const requestTimestamps = [];
+const ROLLING_WINDOW_MS = 30000;
+const SAFE_QUOTA_PER_WINDOW = 12; // Conservative threshold below Spotify's ~15-20 calls/30s
+
+function recordRequest() {
+  const now = Date.now();
+  requestTimestamps.push(now);
+  while (requestTimestamps.length > 0 && requestTimestamps[0] < now - ROLLING_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+}
+
+function getRequestsInLastWindow() {
+  const now = Date.now();
+  while (requestTimestamps.length > 0 && requestTimestamps[0] < now - ROLLING_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+  return requestTimestamps.length;
+}
+
+/**
+ * Background poller checks this before making non-essential poll requests.
+ * If quota is close to the threshold, background calls pause to ensure
+ * interactive user actions (search, play, skip) never get throttled.
+ */
+function canMakeBackgroundRequest() {
+  if (isRateLimited()) return false;
+  return getRequestsInLastWindow() < SAFE_QUOTA_PER_WINDOW;
+}
+
+// In-memory search query cache: queryKey -> { data, expiresAt }
+const searchCache = new Map();
+const SEARCH_CACHE_TTL_MS = 120000; // 2 minutes
+
+function getCachedSearch(query, limit) {
+  const key = `${query.toLowerCase().trim()}_${limit}`;
+  const cached = searchCache.get(key);
+  if (cached) {
+    if (Date.now() < cached.expiresAt) {
+      return cached.data;
+    }
+    searchCache.delete(key);
+  }
+  return null;
+}
+
+function setCachedSearch(query, limit, data) {
+  const key = `${query.toLowerCase().trim()}_${limit}`;
+  if (searchCache.size > 150) {
+    const firstKey = searchCache.keys().next().value;
+    searchCache.delete(firstKey);
+  }
+  searchCache.set(key, {
+    data,
+    expiresAt: Date.now() + SEARCH_CACHE_TTL_MS
+  });
+}
+
 // Dedicated Axios client with automatic 429 backoff protection
 const spotifyApi = axios.create({
   baseURL: SPOTIFY_API_URL,
@@ -44,6 +103,7 @@ spotifyApi.interceptors.request.use((config) => {
     err.retryAfter = remaining;
     return Promise.reject(err);
   }
+  recordRequest();
   return config;
 });
 
@@ -126,11 +186,17 @@ async function refreshAccessToken(refreshToken, clientId, clientSecret) {
 }
 
 /**
- * Search tracks on Spotify
+ * Search tracks on Spotify (with in-memory TTL caching)
  */
 async function searchTracks(query, accessToken, limit = 10) {
   if (!query || !query.trim()) return [];
   const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 10), 10);
+
+  // Return cached result if available to save API quota
+  const cached = getCachedSearch(query, safeLimit);
+  if (cached) {
+    return cached;
+  }
 
   const response = await spotifyApi.get('/search', {
     params: {
@@ -144,7 +210,7 @@ async function searchTracks(query, accessToken, limit = 10) {
   });
 
   const tracks = response.data?.tracks?.items || [];
-  return tracks.map(track => ({
+  const results = tracks.map(track => ({
     id: track.id,
     uri: track.uri,
     name: track.name,
@@ -155,6 +221,9 @@ async function searchTracks(query, accessToken, limit = 10) {
     explicit: track.explicit,
     previewUrl: track.preview_url
   }));
+
+  setCachedSearch(query, safeLimit, results);
+  return results;
 }
 
 /**
@@ -372,5 +441,7 @@ module.exports = {
   previousTrack,
   getUserProfile,
   isRateLimited,
-  getRateLimitRemainingSeconds
+  getRateLimitRemainingSeconds,
+  canMakeBackgroundRequest,
+  getRequestsInLastWindow
 };

@@ -294,6 +294,8 @@ app.get('/api/room/:code', (req, res) => {
     return res.status(404).json({ error: 'Room not found' });
   }
 
+  roomManager.wakeRoom(room.code);
+
   const isHost = verifyHostAuth(req, room);
   if (isHost) {
     return res.json(roomManager.getHostState(room));
@@ -592,6 +594,7 @@ io.on('connection', (socket) => {
 
     socket.join(currentRoom);
     room.guests.set(socket.id, { name: guestNickname });
+    roomManager.wakeRoom(currentRoom);
 
     const isHost = hostKey && roomManager.verifyHost(currentRoom, hostKey);
     if (isHost) {
@@ -608,6 +611,7 @@ io.on('connection', (socket) => {
     const code = roomCode.toUpperCase();
     if (roomManager.verifyHost(code, hostKey)) {
       socket.join(`${code}_host`);
+      roomManager.wakeRoom(code);
       const room = roomManager.getRoom(code);
       if (room) {
         socket.emit('room_state', roomManager.getHostState(room));
