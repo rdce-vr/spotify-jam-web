@@ -11,6 +11,54 @@ const SCOPES = [
   'user-read-email'
 ].join(' ');
 
+// ==================== RATE LIMIT / QUOTA DEFENSE ====================
+let rateLimitedUntil = 0;
+
+function isRateLimited() {
+  return Date.now() < rateLimitedUntil;
+}
+
+function getRateLimitRemainingSeconds() {
+  return Math.max(0, Math.ceil((rateLimitedUntil - Date.now()) / 1000));
+}
+
+function setRateLimitBackoff(seconds) {
+  const waitSec = Math.max(5, parseInt(seconds, 10) || 10);
+  rateLimitedUntil = Date.now() + (waitSec * 1000) + 1000;
+  console.warn(`⚠️ [Spotify API Rate Limit] Quota exceeded. Pausing API calls for ${waitSec}s (cooldown until ${new Date(rateLimitedUntil).toLocaleTimeString()}).`);
+}
+
+// Dedicated Axios client with automatic 429 backoff protection
+const spotifyApi = axios.create({
+  baseURL: SPOTIFY_API_URL,
+  timeout: 10000
+});
+
+// Guard: block requests locally while in rate limit cooldown to prevent Spotify penalty extension
+spotifyApi.interceptors.request.use((config) => {
+  if (isRateLimited()) {
+    const remaining = getRateLimitRemainingSeconds();
+    const err = new Error(`Spotify rate limit cooldown active (${remaining}s remaining)`);
+    err.status = 429;
+    err.isRateLimited = true;
+    err.retryAfter = remaining;
+    return Promise.reject(err);
+  }
+  return config;
+});
+
+// Response: automatically capture 429 responses and start backoff timer
+spotifyApi.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response?.status === 429) {
+      const retryAfter = parseInt(err.response.headers?.['retry-after'], 10) || 10;
+      setRateLimitBackoff(retryAfter);
+    }
+    return Promise.reject(err);
+  }
+);
+
 /**
  * Generate Spotify OAuth Authorization URL
  */
@@ -82,11 +130,9 @@ async function refreshAccessToken(refreshToken, clientId, clientSecret) {
  */
 async function searchTracks(query, accessToken, limit = 10) {
   if (!query || !query.trim()) return [];
-
-  // Spotify Web API strictly caps search limit to 10 for standard developer apps
   const safeLimit = Math.min(Math.max(1, parseInt(limit, 10) || 10), 10);
 
-  const response = await axios.get(`${SPOTIFY_API_URL}/search`, {
+  const response = await spotifyApi.get('/search', {
     params: {
       q: query.trim(),
       type: 'track',
@@ -113,61 +159,33 @@ async function searchTracks(query, accessToken, limit = 10) {
 
 /**
  * Get current playback state (now playing, progress, device)
- * Includes automatic fallback to /currently-playing when /player returns 204
  */
 async function getPlaybackState(accessToken) {
+  if (isRateLimited()) return null;
+
   try {
-    let response = null;
+    let response;
     try {
-      response = await axios.get(`${SPOTIFY_API_URL}/me/player`, {
+      response = await spotifyApi.get('/me/player', {
         headers: {
           'Authorization': `Bearer ${accessToken}`
         }
       });
     } catch (err) {
-      if (err.response?.status === 204) {
-        response = { status: 204 };
-      } else {
-        throw err;
+      if (err.response?.status === 204 || err.status === 204) {
+        return null;
       }
+      throw err;
     }
 
-    // If /me/player returns 204 or empty data, fall back to /me/player/currently-playing
     if (!response || response.status === 204 || !response.data) {
-      try {
-        const cpRes = await axios.get(`${SPOTIFY_API_URL}/me/player/currently-playing`, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`
-          }
-        });
-
-        if (cpRes.status === 200 && cpRes.data && cpRes.data.item) {
-          const cpData = cpRes.data;
-          return {
-            isPlaying: cpData.is_playing,
-            progressMs: cpData.progress_ms || 0,
-            device: null,
-            track: {
-              id: cpData.item.id,
-              uri: cpData.item.uri,
-              name: cpData.item.name,
-              artists: (cpData.item.artists || []).map(a => a.name).join(', '),
-              albumName: cpData.item.album?.name || '',
-              albumArt: cpData.item.album?.images?.[0]?.url || '',
-              durationMs: cpData.item.duration_ms
-            }
-          };
-        }
-      } catch (cpErr) {
-        // Fallback suppressed
-      }
       return null;
     }
 
     const data = response.data;
     return {
-      isPlaying: data.is_playing,
-      progressMs: data.progress_ms,
+      isPlaying: Boolean(data.is_playing),
+      progressMs: data.progress_ms || 0,
       device: data.device ? {
         id: data.device.id,
         name: data.device.name,
@@ -186,7 +204,7 @@ async function getPlaybackState(accessToken) {
       } : null
     };
   } catch (error) {
-    if (error.response && error.response.status === 204) return null;
+    if (error.response?.status === 204 || error.status === 204) return null;
     throw error;
   }
 }
@@ -196,7 +214,7 @@ async function getPlaybackState(accessToken) {
  */
 async function getUserProfile(accessToken) {
   try {
-    const response = await axios.get(`${SPOTIFY_API_URL}/me`, {
+    const response = await spotifyApi.get('/me', {
       headers: {
         'Authorization': `Bearer ${accessToken}`
       }
@@ -219,7 +237,7 @@ async function addToSpotifyQueue(uri, accessToken, deviceId = null) {
   const params = { uri };
   if (deviceId) params.device_id = deviceId;
 
-  const response = await axios.post(`${SPOTIFY_API_URL}/me/player/queue`, null, {
+  const response = await spotifyApi.post('/me/player/queue', null, {
     params: params,
     headers: {
       'Authorization': `Bearer ${accessToken}`
@@ -233,7 +251,7 @@ async function addToSpotifyQueue(uri, accessToken, deviceId = null) {
  * Fetch available playback devices
  */
 async function getAvailableDevices(accessToken) {
-  const response = await axios.get(`${SPOTIFY_API_URL}/me/player/devices`, {
+  const response = await spotifyApi.get('/me/player/devices', {
     headers: {
       'Authorization': `Bearer ${accessToken}`
     }
@@ -261,7 +279,7 @@ async function transferPlayback(deviceId, accessToken, play = null) {
     payload.play = play;
   }
 
-  const response = await axios.put(`${SPOTIFY_API_URL}/me/player`, payload, {
+  const response = await spotifyApi.put('/me/player', payload, {
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json'
@@ -278,7 +296,7 @@ async function resumePlayback(accessToken, deviceId = null) {
   const params = {};
   if (deviceId) params.device_id = deviceId;
 
-  const response = await axios.put(`${SPOTIFY_API_URL}/me/player/play`, null, {
+  const response = await spotifyApi.put('/me/player/play', null, {
     params,
     headers: {
       'Authorization': `Bearer ${accessToken}`
@@ -295,7 +313,7 @@ async function pausePlayback(accessToken, deviceId = null) {
   const params = {};
   if (deviceId) params.device_id = deviceId;
 
-  const response = await axios.put(`${SPOTIFY_API_URL}/me/player/pause`, null, {
+  const response = await spotifyApi.put('/me/player/pause', null, {
     params,
     headers: {
       'Authorization': `Bearer ${accessToken}`
@@ -312,7 +330,7 @@ async function nextTrack(accessToken, deviceId = null) {
   const params = {};
   if (deviceId) params.device_id = deviceId;
 
-  const response = await axios.post(`${SPOTIFY_API_URL}/me/player/next`, null, {
+  const response = await spotifyApi.post('/me/player/next', null, {
     params,
     headers: {
       'Authorization': `Bearer ${accessToken}`
@@ -329,7 +347,7 @@ async function previousTrack(accessToken, deviceId = null) {
   const params = {};
   if (deviceId) params.device_id = deviceId;
 
-  const response = await axios.post(`${SPOTIFY_API_URL}/me/player/previous`, null, {
+  const response = await spotifyApi.post('/me/player/previous', null, {
     params,
     headers: {
       'Authorization': `Bearer ${accessToken}`
@@ -352,5 +370,7 @@ module.exports = {
   pausePlayback,
   nextTrack,
   previousTrack,
-  getUserProfile
+  getUserProfile,
+  isRateLimited,
+  getRateLimitRemainingSeconds
 };

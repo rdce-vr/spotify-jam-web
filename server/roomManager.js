@@ -8,7 +8,9 @@ const {
   resumePlayback,
   pausePlayback,
   nextTrack,
-  previousTrack
+  previousTrack,
+  isRateLimited,
+  getRateLimitRemainingSeconds
 } = require('./spotifyService');
 
 class RoomManager {
@@ -290,6 +292,9 @@ class RoomManager {
    * Host Playback Control: Resume / Play
    */
   async playPlayback(roomCode) {
+    if (isRateLimited()) {
+      throw new Error(`Spotify rate limit cooldown active. Please wait ${getRateLimitRemainingSeconds()}s.`);
+    }
     const room = this.getRoom(roomCode);
     if (!room) throw new Error('Room not found');
     const token = await this.getValidToken(room);
@@ -299,7 +304,7 @@ class RoomManager {
     room.playback.isPlaying = true;
     room.playback.updatedAt = Date.now();
     this.broadcastRoomState(roomCode);
-    this.pollRoomNow(roomCode);
+    setTimeout(() => this.pollRoomNow(roomCode), 500);
     return true;
   }
 
@@ -307,6 +312,9 @@ class RoomManager {
    * Host Playback Control: Pause
    */
   async pausePlayback(roomCode) {
+    if (isRateLimited()) {
+      throw new Error(`Spotify rate limit cooldown active. Please wait ${getRateLimitRemainingSeconds()}s.`);
+    }
     const room = this.getRoom(roomCode);
     if (!room) throw new Error('Room not found');
     const token = await this.getValidToken(room);
@@ -316,7 +324,7 @@ class RoomManager {
     room.playback.isPlaying = false;
     room.playback.updatedAt = Date.now();
     this.broadcastRoomState(roomCode);
-    this.pollRoomNow(roomCode);
+    setTimeout(() => this.pollRoomNow(roomCode), 500);
     return true;
   }
 
@@ -324,6 +332,9 @@ class RoomManager {
    * Host Playback Control: Next (Skip)
    */
   async nextPlayback(roomCode) {
+    if (isRateLimited()) {
+      throw new Error(`Spotify rate limit cooldown active. Please wait ${getRateLimitRemainingSeconds()}s.`);
+    }
     const room = this.getRoom(roomCode);
     if (!room) throw new Error('Room not found');
     const token = await this.getValidToken(room);
@@ -360,6 +371,9 @@ class RoomManager {
    * Host Playback Control: Previous
    */
   async previousPlayback(roomCode) {
+    if (isRateLimited()) {
+      throw new Error(`Spotify rate limit cooldown active. Please wait ${getRateLimitRemainingSeconds()}s.`);
+    }
     const room = this.getRoom(roomCode);
     if (!room) throw new Error('Room not found');
     const token = await this.getValidToken(room);
@@ -377,6 +391,9 @@ class RoomManager {
   async syncPlayback(roomCode) {
     const room = this.getRoom(roomCode);
     if (!room) return null;
+    if (isRateLimited()) {
+      return room.playback;
+    }
     let token = await this.getValidToken(room);
     if (!token) return null;
 
@@ -431,91 +448,104 @@ class RoomManager {
   }
 
   startPoller() {
-    if (this.pollerInterval) return;
+    if (this.isPolling) return;
+    this.isPolling = true;
 
-    this.pollerInterval = setInterval(async () => {
-      for (const [code, room] of this.rooms.entries()) {
-        try {
-          let token = await this.getValidToken(room);
-          if (!token) continue;
+    const runPollCycle = async () => {
+      let anyRoomPlaying = false;
 
-          let playerState = null;
+      if (!isRateLimited()) {
+        for (const [code, room] of this.rooms.entries()) {
           try {
-            playerState = await getPlaybackState(token);
-          } catch (err) {
-            if (err.response?.status === 401) {
-              console.warn(`[Room ${code}] 401 Unauthorized from Spotify. Refreshing token immediately...`);
-              room.hostTokens.expiresAt = 0;
-              token = await this.getValidToken(room);
-              if (token) {
-                try {
-                  playerState = await getPlaybackState(token);
-                } catch (e2) {}
+            let token = await this.getValidToken(room);
+            if (!token) continue;
+
+            let playerState = null;
+            try {
+              playerState = await getPlaybackState(token);
+            } catch (err) {
+              if (err.response?.status === 401) {
+                console.warn(`[Room ${code}] 401 Unauthorized from Spotify. Refreshing token immediately...`);
+                room.hostTokens.expiresAt = 0;
+                token = await this.getValidToken(room);
+                if (token) {
+                  try {
+                    playerState = await getPlaybackState(token);
+                  } catch (e2) {}
+                }
+              } else if (err.response?.status === 429 || err.isRateLimited) {
+                break;
               }
-            } else if (err.response?.status !== 502) {
-              // normal background polling noise suppressed
             }
-          }
 
-          if (playerState) {
-            const previousTrackId = room.playback?.track?.id;
-            const currentTrackId = playerState.track?.id;
-            const currentTrackUri = playerState.track?.uri;
+            if (playerState) {
+              if (playerState.isPlaying) {
+                anyRoomPlaying = true;
+              }
 
-            room.playback = {
-              isPlaying: playerState.isPlaying,
-              track: playerState.track,
-              progressMs: playerState.progressMs,
-              device: playerState.device,
-              updatedAt: Date.now()
-            };
+              const previousTrackId = room.playback?.track?.id;
+              const currentTrackId = playerState.track?.id;
+              const currentTrackUri = playerState.track?.uri;
 
-            // DEVICE LOCK ENFORCEMENT:
-            // If the host locked playback to a chosen device, and playback wandered to another device (e.g. phone/TWS)
-            if (
-              room.settings.lockDevice &&
-              room.selectedDeviceId &&
-              playerState.device &&
-              playerState.device.id !== room.selectedDeviceId
-            ) {
-              const now = Date.now();
-              // Debounce transfer by 6 seconds to avoid rapid bouncing while Spotify switches
-              if (!room.lastTransferAttempt || now - room.lastTransferAttempt > 6000) {
-                room.lastTransferAttempt = now;
-                console.log(`[Room ${code}] Playback drifted to "${playerState.device.name}". Enforcing lock: transferring back to device ${room.selectedDeviceId}...`);
-                try {
-                  await transferPlayback(room.selectedDeviceId, token, playerState.isPlaying);
-                } catch (err) {
-                  console.error(`[Room ${code}] Device lock transfer failed:`, err.response?.data || err.message);
+              room.playback = {
+                isPlaying: playerState.isPlaying,
+                track: playerState.track,
+                progressMs: playerState.progressMs,
+                device: playerState.device,
+                updatedAt: Date.now()
+              };
+
+              // DEVICE LOCK ENFORCEMENT:
+              if (
+                room.settings.lockDevice &&
+                room.selectedDeviceId &&
+                playerState.device &&
+                playerState.device.id !== room.selectedDeviceId
+              ) {
+                const now = Date.now();
+                if (!room.lastTransferAttempt || now - room.lastTransferAttempt > 8000) {
+                  room.lastTransferAttempt = now;
+                  console.log(`[Room ${code}] Playback drifted to "${playerState.device.name}". Enforcing lock: transferring back to device ${room.selectedDeviceId}...`);
+                  try {
+                    await transferPlayback(room.selectedDeviceId, token, playerState.isPlaying);
+                  } catch (err) {}
                 }
               }
-            }
 
-            // If Spotify has now started playing the buffered track, pop it from the queue!
-            if (currentTrackUri && room.bufferedTrackUri === currentTrackUri) {
-              if (room.queue.length > 0 && room.queue[0].uri === currentTrackUri) {
-                room.queue.shift(); // remove the playing song from upcoming queue
-                room.bufferedTrackUri = null;
-                // Buffer the new #1 song in the queue for next seamless transition
+              // Auto-buffer next track in smart mode:
+              if (currentTrackUri && room.bufferedTrackUri === currentTrackUri) {
+                if (room.queue.length > 0 && room.queue[0].uri === currentTrackUri) {
+                  room.queue.shift();
+                  room.bufferedTrackUri = null;
+                  await this.checkAndBufferNextTrack(room);
+                }
+              } else if (previousTrackId !== currentTrackId && room.queue.length > 0) {
                 await this.checkAndBufferNextTrack(room);
               }
-            } else if (previousTrackId !== currentTrackId && room.queue.length > 0) {
-              // Track changed, make sure next track is buffered
-              await this.checkAndBufferNextTrack(room);
+            } else {
+              room.playback.isPlaying = false;
             }
-          } else {
-            room.playback.isPlaying = false;
-          }
 
-          this.broadcastRoomState(code);
-        } catch (err) {
-          // Log only unexpected errors, silent on network hiccups
-          if (err.response?.status !== 401 && err.response?.status !== 502) {
-            // normal background polling noise suppressed
+            this.broadcastRoomState(code);
+          } catch (err) {
+            // suppress normal errors
           }
         }
       }
-    }, 3000);
+
+      // Adaptive polling delay:
+      // If rate-limited: wait until rate limit clears + buffer
+      // If playing: poll every 4.5 seconds
+      // If idle/stopped: poll every 8 seconds
+      let nextDelay = anyRoomPlaying ? 4500 : 8000;
+      if (isRateLimited()) {
+        nextDelay = Math.max(nextDelay, (getRateLimitRemainingSeconds() * 1000) + 1500);
+      }
+
+      this.pollerTimeout = setTimeout(runPollCycle, nextDelay);
+    };
+
+    runPollCycle();
   }
 }
 
