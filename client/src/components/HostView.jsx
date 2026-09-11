@@ -38,7 +38,8 @@ export function HostView({
   onNext,
   onPrevious,
   actionLoading,
-  onSwitchToGuest
+  onSwitchToGuest,
+  onSync
 }) {
   const effectivePin = hostPin || room.hostPin || '';
   const [devices, setDevices] = useState([]);
@@ -202,6 +203,12 @@ export function HostView({
                 <Users className="w-3.5 h-3.5" />
                 <span>{room.guestCount || 0} guest{room.guestCount === 1 ? '' : 's'}</span>
               </span>
+              {room.hostProfile?.displayName && (
+                <span className="flex items-center gap-1 bg-neutral-800/90 text-neutral-300 px-2 py-0.5 rounded-md text-[11px] border border-white/10 font-medium" title={`Connected Spotify account: ${room.hostProfile.email || room.hostProfile.displayName}`}>
+                  <span className="text-spotify-green text-[9px]">●</span>
+                  <span>{room.hostProfile.displayName}</span>
+                </span>
+              )}
               {effectivePin && (
                 <button
                   onClick={() => {
@@ -364,6 +371,7 @@ export function HostView({
         onNext={onNext}
         onPrevious={onPrevious}
         actionLoading={actionLoading}
+        onSync={onSync}
       />
 
       {/* Tabs: Party Queue vs Pick Songs */}

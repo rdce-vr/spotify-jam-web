@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Music, Speaker, Play, Pause, SkipBack, SkipForward, Loader2 } from 'lucide-react';
+import { Music, Speaker, Play, Pause, SkipBack, SkipForward, Loader2, RefreshCw } from 'lucide-react';
 
 export function NowPlaying({
   playback,
@@ -8,7 +8,8 @@ export function NowPlaying({
   onPause,
   onNext,
   onPrevious,
-  actionLoading = null
+  actionLoading = null,
+  onSync = null
 }) {
   const [currentProgress, setCurrentProgress] = useState(playback?.progressMs || 0);
 
@@ -62,18 +63,31 @@ export function NowPlaying({
             </div>
           )}
           {isHost && (
-            <button
-              onClick={onPlay}
-              disabled={Boolean(actionLoading)}
-              className="flex items-center gap-1.5 bg-spotify-green hover:bg-spotify-green-hover text-black text-xs font-bold px-3.5 py-1.5 rounded-full transition-transform active:scale-95 shadow-md shadow-spotify-green/20 disabled:opacity-50"
-            >
-              {actionLoading === 'play' ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Play className="w-3.5 h-3.5 fill-black" />
+            <div className="flex items-center gap-2">
+              {onSync && (
+                <button
+                  onClick={onSync}
+                  disabled={Boolean(actionLoading)}
+                  title="Check Spotify player status right now"
+                  className="flex items-center gap-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/10 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${actionLoading === 'sync' ? 'animate-spin text-spotify-green' : ''}`} />
+                  <span>Sync Spotify</span>
+                </button>
               )}
-              <span>Resume Playback</span>
-            </button>
+              <button
+                onClick={onPlay}
+                disabled={Boolean(actionLoading)}
+                className="flex items-center gap-1.5 bg-spotify-green hover:bg-spotify-green-hover text-black text-xs font-bold px-3.5 py-1.5 rounded-full transition-transform active:scale-95 shadow-md shadow-spotify-green/20 disabled:opacity-50"
+              >
+                {actionLoading === 'play' ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Play className="w-3.5 h-3.5 fill-black" />
+                )}
+                <span>Resume Playback</span>
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -169,7 +183,7 @@ export function NowPlaying({
 
         {/* Host Playback Controls (Exclusive to Host) */}
         {isHost && (
-          <div className="mt-3.5 pt-3 border-t border-white/10 flex items-center justify-center gap-6">
+          <div className="mt-3.5 pt-3 border-t border-white/10 flex items-center justify-center gap-6 relative">
             <button
               onClick={onPrevious}
               disabled={Boolean(actionLoading)}
@@ -202,6 +216,17 @@ export function NowPlaying({
             >
               <SkipForward className="w-5 h-5 fill-current" />
             </button>
+
+            {onSync && (
+              <button
+                onClick={onSync}
+                disabled={Boolean(actionLoading)}
+                title="Sync playback from Spotify"
+                className="absolute right-1 text-neutral-500 hover:text-white p-2 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${actionLoading === 'sync' ? 'animate-spin text-spotify-green' : ''}`} />
+              </button>
+            )}
           </div>
         )}
       </div>

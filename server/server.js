@@ -18,7 +18,8 @@ const {
   getAuthUrl,
   exchangeCodeForTokens,
   searchTracks,
-  getAvailableDevices
+  getAvailableDevices,
+  getUserProfile
 } = require('./spotifyService');
 const RoomManager = require('./roomManager');
 
@@ -224,8 +225,13 @@ app.get('/api/auth/callback', async (req, res) => {
       targetRedirectUri
     );
 
+    let profile = null;
+    try {
+      profile = await getUserProfile(tokens.accessToken);
+    } catch (e) {}
+
     // Create a new room for this host session
-    const room = roomManager.createRoom(tokens);
+    const room = roomManager.createRoom(tokens, profile);
 
     // If built client exists in dist, redirect on targetBaseUrl; otherwise to dev client
     const isDist = fs.existsSync(clientDistPath);
@@ -541,6 +547,20 @@ app.post('/api/room/:code/player/previous', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Previous track error:', err.response?.data || err.message);
+    res.status(400).json({ error: err.response?.data?.error?.message || err.message });
+  }
+});
+
+app.post('/api/room/:code/player/sync', async (req, res) => {
+  const room = roomManager.getRoom(req.params.code);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!verifyHostAuth(req, room)) return res.status(403).json({ error: 'Host privileges required' });
+
+  try {
+    const updatedPlayback = await roomManager.syncPlayback(req.params.code);
+    res.json({ success: true, playback: updatedPlayback });
+  } catch (err) {
+    console.error('Sync error:', err.response?.data || err.message);
     res.status(400).json({ error: err.response?.data?.error?.message || err.message });
   }
 });

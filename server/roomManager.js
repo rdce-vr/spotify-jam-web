@@ -35,7 +35,7 @@ class RoomManager {
     return code;
   }
 
-  createRoom(tokens) {
+  createRoom(tokens, hostProfile = null) {
     let code = this.generateRoomCode();
     while (this.rooms.has(code)) {
       code = this.generateRoomCode();
@@ -50,6 +50,7 @@ class RoomManager {
       code,
       hostPin,
       hostSecret,
+      hostProfile,
       createdAt: Date.now(),
       hostTokens: {
         accessToken: tokens.accessToken,
@@ -280,7 +281,8 @@ class RoomManager {
     return {
       ...this.getPublicState(room),
       hostPin: room.hostPin,
-      hostSecret: room.hostSecret
+      hostSecret: room.hostSecret,
+      hostProfile: room.hostProfile || null
     };
   }
 
@@ -370,26 +372,50 @@ class RoomManager {
   }
 
   /**
+   * Immediately sync playback state with Spotify and broadcast
+   */
+  async syncPlayback(roomCode) {
+    const room = this.getRoom(roomCode);
+    if (!room) return null;
+    let token = await this.getValidToken(room);
+    if (!token) return null;
+
+    let playerState = null;
+    try {
+      playerState = await getPlaybackState(token);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        room.hostTokens.expiresAt = 0;
+        token = await this.getValidToken(room);
+        if (token) {
+          try {
+            playerState = await getPlaybackState(token);
+          } catch (e) {}
+        }
+      }
+    }
+
+    if (playerState) {
+      room.playback = {
+        isPlaying: playerState.isPlaying,
+        track: playerState.track,
+        progressMs: playerState.progressMs,
+        device: playerState.device,
+        updatedAt: Date.now()
+      };
+    } else {
+      room.playback.isPlaying = false;
+    }
+
+    this.broadcastRoomState(roomCode);
+    return room.playback;
+  }
+
+  /**
    * Trigger immediate playback state refresh
    */
   async pollRoomNow(roomCode) {
-    const room = this.getRoom(roomCode);
-    if (!room) return;
-    try {
-      const token = await this.getValidToken(room);
-      if (!token) return;
-      const playerState = await getPlaybackState(token);
-      if (playerState) {
-        room.playback = {
-          isPlaying: playerState.isPlaying,
-          track: playerState.track,
-          progressMs: playerState.progressMs,
-          device: playerState.device,
-          updatedAt: Date.now()
-        };
-        this.broadcastRoomState(roomCode);
-      }
-    } catch (e) {}
+    return this.syncPlayback(roomCode);
   }
 
   broadcastRoomState(roomCode) {
@@ -410,10 +436,26 @@ class RoomManager {
     this.pollerInterval = setInterval(async () => {
       for (const [code, room] of this.rooms.entries()) {
         try {
-          const token = await this.getValidToken(room);
+          let token = await this.getValidToken(room);
           if (!token) continue;
 
-          const playerState = await getPlaybackState(token);
+          let playerState = null;
+          try {
+            playerState = await getPlaybackState(token);
+          } catch (err) {
+            if (err.response?.status === 401) {
+              console.warn(`[Room ${code}] 401 Unauthorized from Spotify. Refreshing token immediately...`);
+              room.hostTokens.expiresAt = 0;
+              token = await this.getValidToken(room);
+              if (token) {
+                try {
+                  playerState = await getPlaybackState(token);
+                } catch (e2) {}
+              }
+            } else if (err.response?.status !== 502) {
+              // normal background polling noise suppressed
+            }
+          }
 
           if (playerState) {
             const previousTrackId = room.playback?.track?.id;

@@ -433,6 +433,31 @@ export function App() {
     }
   };
 
+  const handleSyncPlayback = async () => {
+    if (!roomCode) return;
+    setPlaybackActionLoading('sync');
+    try {
+      const activeKey = hostKey || localStorage.getItem(`jam_host_key_${roomCode}`) || '';
+      const res = await fetch(`/api/room/${roomCode}/player/sync`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-host-key': activeKey
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.playback) {
+          setRoom(prev => ({ ...prev, playback: data.playback }));
+        }
+      }
+    } catch (err) {
+      console.error('Sync playback error:', err);
+    } finally {
+      setPlaybackActionLoading(null);
+    }
+  };
+
   const handleManualJoin = (e) => {
     e.preventDefault();
     const code = joinInputCode.trim().toUpperCase();
@@ -509,6 +534,7 @@ export function App() {
             onPrevious={handlePrevious}
             actionLoading={playbackActionLoading}
             onSwitchToGuest={handleSwitchToGuest}
+            onSync={handleSyncPlayback}
           />
         ) : (
           <div>

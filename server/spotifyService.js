@@ -6,7 +6,9 @@ const SPOTIFY_API_URL = 'https://api.spotify.com/v1';
 const SCOPES = [
   'user-read-playback-state',
   'user-modify-playback-state',
-  'user-read-currently-playing'
+  'user-read-currently-playing',
+  'user-read-private',
+  'user-read-email'
 ].join(' ');
 
 /**
@@ -111,16 +113,54 @@ async function searchTracks(query, accessToken, limit = 10) {
 
 /**
  * Get current playback state (now playing, progress, device)
+ * Includes automatic fallback to /currently-playing when /player returns 204
  */
 async function getPlaybackState(accessToken) {
   try {
-    const response = await axios.get(`${SPOTIFY_API_URL}/me/player`, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
+    let response = null;
+    try {
+      response = await axios.get(`${SPOTIFY_API_URL}/me/player`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+    } catch (err) {
+      if (err.response?.status === 204) {
+        response = { status: 204 };
+      } else {
+        throw err;
       }
-    });
+    }
 
-    if (response.status === 204 || !response.data) {
+    // If /me/player returns 204 or empty data, fall back to /me/player/currently-playing
+    if (!response || response.status === 204 || !response.data) {
+      try {
+        const cpRes = await axios.get(`${SPOTIFY_API_URL}/me/player/currently-playing`, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        });
+
+        if (cpRes.status === 200 && cpRes.data && cpRes.data.item) {
+          const cpData = cpRes.data;
+          return {
+            isPlaying: cpData.is_playing,
+            progressMs: cpData.progress_ms || 0,
+            device: null,
+            track: {
+              id: cpData.item.id,
+              uri: cpData.item.uri,
+              name: cpData.item.name,
+              artists: (cpData.item.artists || []).map(a => a.name).join(', '),
+              albumName: cpData.item.album?.name || '',
+              albumArt: cpData.item.album?.images?.[0]?.url || '',
+              durationMs: cpData.item.duration_ms
+            }
+          };
+        }
+      } catch (cpErr) {
+        // Fallback suppressed
+      }
       return null;
     }
 
@@ -139,15 +179,36 @@ async function getPlaybackState(accessToken) {
         id: data.item.id,
         uri: data.item.uri,
         name: data.item.name,
-        artists: data.item.artists.map(a => a.name).join(', '),
-        albumName: data.item.album.name,
-        albumArt: data.item.album.images?.[0]?.url || '',
+        artists: (data.item.artists || []).map(a => a.name).join(', '),
+        albumName: data.item.album?.name || '',
+        albumArt: data.item.album?.images?.[0]?.url || '',
         durationMs: data.item.duration_ms
       } : null
     };
   } catch (error) {
     if (error.response && error.response.status === 204) return null;
     throw error;
+  }
+}
+
+/**
+ * Get authenticated user profile info (display name, email, product)
+ */
+async function getUserProfile(accessToken) {
+  try {
+    const response = await axios.get(`${SPOTIFY_API_URL}/me`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    return {
+      id: response.data.id,
+      displayName: response.data.display_name || response.data.id,
+      email: response.data.email || '',
+      product: response.data.product || 'free'
+    };
+  } catch (err) {
+    return null;
   }
 }
 
@@ -290,5 +351,6 @@ module.exports = {
   resumePlayback,
   pausePlayback,
   nextTrack,
-  previousTrack
+  previousTrack,
+  getUserProfile
 };
