@@ -83,6 +83,7 @@ class RoomManager {
     };
 
     this.rooms.set(code, room);
+    this.broadcastAdminUpdate();
     return room;
   }
 
@@ -292,6 +293,108 @@ class RoomManager {
   }
 
   /**
+   * Get comprehensive summary of all active rooms for Admin Dashboard
+   */
+  getAllRoomsSummary() {
+    const list = [];
+    const now = Date.now();
+    for (const [code, room] of this.rooms.entries()) {
+      const hasActiveViewers = (room.guests && room.guests.size > 0) || (now - (room.lastActiveViewerAt || 0)) < 15000;
+      const guests = [];
+      if (room.guests) {
+        for (const [socketId, guest] of room.guests.entries()) {
+          guests.push({
+            socketId,
+            name: guest.name || 'Guest'
+          });
+        }
+      }
+
+      list.push({
+        code: room.code,
+        hostPin: room.hostPin,
+        hostSecret: room.hostSecret,
+        hostProfile: room.hostProfile || null,
+        createdAt: room.createdAt,
+        uptimeSeconds: Math.floor((now - room.createdAt) / 1000),
+        playback: room.playback,
+        selectedDeviceId: room.selectedDeviceId,
+        settings: room.settings,
+        guestCount: room.guests ? room.guests.size : 0,
+        guests: guests,
+        queueLength: room.queue ? room.queue.length : 0,
+        queuePreview: (room.queue || []).slice(0, 5),
+        isDormant: !hasActiveViewers,
+        lastActiveViewerAt: room.lastActiveViewerAt,
+        lastSyncAt: room.lastSyncAt
+      });
+    }
+    return list;
+  }
+
+  /**
+   * Close a room session completely: notify sockets, disconnect them, and remove from active rooms
+   */
+  closeRoom(roomCode, reason = 'Room session was closed by administrator') {
+    const code = (roomCode || '').toUpperCase();
+    const room = this.getRoom(code);
+    if (!room) return false;
+
+    // 1. Notify all connected sockets in this room
+    if (this.io) {
+      this.io.to(code).emit('room_closed', {
+        roomCode: code,
+        reason
+      });
+      // 2. Force disconnect all sockets in this room
+      this.io.in(code).disconnectSockets(true);
+    }
+
+    // 3. Clean up room data
+    this.rooms.delete(code);
+    console.log(`[Admin] Closed room ${code}. Reason: ${reason}`);
+
+    // 4. Notify admin dashboard
+    this.broadcastAdminUpdate();
+
+    return true;
+  }
+
+  /**
+   * Disconnect all guest sockets in a room while keeping the host active
+   */
+  disconnectGuests(roomCode, reason = 'All guests were disconnected by administrator') {
+    const code = (roomCode || '').toUpperCase();
+    const room = this.getRoom(code);
+    if (!room) return false;
+
+    if (this.io) {
+      // Send kick notification to guests only (not to host)
+      this.io.to(code).except(`${code}_host`).emit('session_kicked', {
+        roomCode: code,
+        reason
+      });
+      // Disconnect non-host sockets
+      this.io.in(code).except(`${code}_host`).disconnectSockets(true);
+    }
+
+    // Clear guests list
+    if (room.guests) {
+      room.guests.clear();
+    }
+
+    this.broadcastRoomState(code);
+    this.broadcastAdminUpdate();
+    return true;
+  }
+
+  broadcastAdminUpdate() {
+    if (this.io) {
+      this.io.to('admin_dashboard').emit('admin_rooms_update', this.getAllRoomsSummary());
+    }
+  }
+
+  /**
    * Host Playback Control: Resume / Play
    */
   async playPlayback(roomCode) {
@@ -465,6 +568,9 @@ class RoomManager {
     this.io.to(roomCode).except(`${roomCode}_host`).emit('room_state', publicState);
     // Send elevated state (with hostPin & hostSecret) to authenticated hosts
     this.io.to(`${roomCode}_host`).emit('room_state', hostState);
+
+    // Notify admin dashboard
+    this.broadcastAdminUpdate();
   }
 
   /**

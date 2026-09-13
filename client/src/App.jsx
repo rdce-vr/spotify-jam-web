@@ -3,6 +3,7 @@ import { socket } from './socket';
 import SetupView from './components/SetupView';
 import HostView from './components/HostView';
 import GuestView from './components/GuestView';
+import AdminView from './components/AdminView';
 import { Music2, ArrowRight, ArrowLeft, AlertCircle, Sparkles } from 'lucide-react';
 
 export function App() {
@@ -213,8 +214,20 @@ export function App() {
       if (isMounted) setError(msg);
     };
 
+    const handleRoomClosed = ({ reason }) => {
+      alert(`Session closed: ${reason || 'Room session ended by administrator'}`);
+      window.location.href = '/';
+    };
+
+    const handleSessionKicked = ({ reason }) => {
+      alert(`Disconnected: ${reason || 'All guests were disconnected by administrator'}`);
+      window.location.href = '/';
+    };
+
     socket.on('room_state', handleRoomState);
     socket.on('error_message', handleError);
+    socket.on('room_closed', handleRoomClosed);
+    socket.on('session_kicked', handleSessionKicked);
 
     // If host, also fetch QR code data
     if (isHost) {
@@ -235,6 +248,8 @@ export function App() {
       socket.off('disconnect', onDisconnect);
       socket.off('room_state', handleRoomState);
       socket.off('error_message', handleError);
+      socket.off('room_closed', handleRoomClosed);
+      socket.off('session_kicked', handleSessionKicked);
     };
   }, [roomCode, nickname, isHost]);
 
@@ -464,6 +479,12 @@ export function App() {
     if (!code) return;
     window.location.href = `/room/${code}`;
   };
+
+  // Dedicated Admin Dashboard Route
+  const isAdminRoute = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/');
+  if (isAdminRoute) {
+    return <AdminView socket={socket} />;
+  }
 
   if (loading) {
     return (

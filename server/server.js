@@ -33,6 +33,7 @@ try {
     if (raw.clientId && !process.env.SPOTIFY_CLIENT_ID) process.env.SPOTIFY_CLIENT_ID = raw.clientId;
     if (raw.clientSecret && !process.env.SPOTIFY_CLIENT_SECRET) process.env.SPOTIFY_CLIENT_SECRET = raw.clientSecret;
     if (raw.redirectUri && !process.env.REDIRECT_URI) process.env.REDIRECT_URI = raw.redirectUri;
+    if (raw.adminPassword && !process.env.ADMIN_PASSWORD) process.env.ADMIN_PASSWORD = raw.adminPassword;
   }
 } catch (e) {}
 
@@ -41,6 +42,7 @@ loadDotEnvSafe(path.join(DATA_DIR, '.env'));
 loadDotEnvSafe(path.join(__dirname, '.env'));
 loadDotEnvSafe(path.join(__dirname, '..', '.env'));
 
+const crypto = require('crypto');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -54,7 +56,10 @@ const {
   exchangeCodeForTokens,
   searchTracks,
   getAvailableDevices,
-  getUserProfile
+  getUserProfile,
+  isRateLimited,
+  getRateLimitRemainingSeconds,
+  getRequestsInLastWindow
 } = require('./spotifyService');
 const RoomManager = require('./roomManager');
 
@@ -65,6 +70,7 @@ const CLIENT_PORT = process.env.CLIENT_PORT || 3000;
 let SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || '';
 let SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || '';
 let REDIRECT_URI = process.env.REDIRECT_URI || `http://127.0.0.1:${PORT}/api/auth/callback`;
+let ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
 function getLocalIp() {
   if (process.env.HOST_IP) {
@@ -646,6 +652,113 @@ app.post('/api/room/:code/player/sync', async (req, res) => {
   }
 });
 
+// ==================== ADMIN AUTHENTICATION & MANAGEMENT ====================
+
+function getAdminExpectedToken() {
+  return crypto.createHash('sha256').update(String(ADMIN_PASSWORD)).digest('hex');
+}
+
+function verifyAdmin(req, res, next) {
+  const token = req.headers['x-admin-token'] || req.query.adminToken;
+  const expected = getAdminExpectedToken();
+  if (!token || token !== expected) {
+    return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+  }
+  next();
+}
+
+/**
+ * Admin Login
+ */
+app.post('/api/admin/login', (req, res) => {
+  const { password } = req.body;
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+
+  if (String(password).trim() !== String(ADMIN_PASSWORD).trim()) {
+    return res.status(401).json({ error: 'Invalid admin password' });
+  }
+
+  res.json({
+    success: true,
+    token: getAdminExpectedToken()
+  });
+});
+
+/**
+ * Admin System Status
+ */
+app.get('/api/admin/status', verifyAdmin, (req, res) => {
+  const rooms = roomManager.getAllRoomsSummary();
+  const totalGuests = rooms.reduce((sum, r) => sum + (r.guestCount || 0), 0);
+
+  res.json({
+    success: true,
+    serverUptime: Math.floor(process.uptime()),
+    activeRoomsCount: rooms.length,
+    totalGuestsCount: totalGuests,
+    spotifyConfigured: Boolean(SPOTIFY_CLIENT_ID && SPOTIFY_CLIENT_SECRET),
+    rateLimited: isRateLimited(),
+    rateLimitRemainingSeconds: getRateLimitRemainingSeconds(),
+    recentApiRequests: getRequestsInLastWindow()
+  });
+});
+
+/**
+ * Admin - List all active rooms
+ */
+app.get('/api/admin/rooms', verifyAdmin, (req, res) => {
+  res.json({
+    success: true,
+    rooms: roomManager.getAllRoomsSummary()
+  });
+});
+
+/**
+ * Admin - Close/Terminate Room Session
+ */
+app.post('/api/admin/room/:code/close', verifyAdmin, (req, res) => {
+  const code = (req.params.code || '').toUpperCase();
+  const reason = req.body?.reason || 'Room session was closed by administrator';
+  const success = roomManager.closeRoom(code, reason);
+  if (!success) {
+    return res.status(404).json({ error: `Room ${code} not found` });
+  }
+  res.json({ success: true, message: `Room ${code} closed successfully` });
+});
+
+/**
+ * Admin - Disconnect Guests in Room
+ */
+app.post('/api/admin/room/:code/disconnect-guests', verifyAdmin, (req, res) => {
+  const code = (req.params.code || '').toUpperCase();
+  const reason = req.body?.reason || 'All guests were disconnected by administrator';
+  const success = roomManager.disconnectGuests(code, reason);
+  if (!success) {
+    return res.status(404).json({ error: `Room ${code} not found` });
+  }
+  res.json({ success: true, message: `Disconnected guests in room ${code}` });
+});
+
+/**
+ * Admin - Force Playback Sync for Room
+ */
+app.post('/api/admin/room/:code/sync', verifyAdmin, async (req, res) => {
+  const code = (req.params.code || '').toUpperCase();
+  const room = roomManager.getRoom(code);
+  if (!room) {
+    return res.status(404).json({ error: `Room ${code} not found` });
+  }
+
+  try {
+    const updatedPlayback = await roomManager.syncPlayback(code);
+    res.json({ success: true, playback: updatedPlayback });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Fallback for SPA in production
 if (fs.existsSync(clientDistPath)) {
   app.get('*', (req, res) => {
@@ -703,6 +816,13 @@ io.on('connection', (socket) => {
       roomManager.reorderQueue(roomCode, fromIndex, toIndex);
     } catch (err) {
       socket.emit('error_message', err.message);
+    }
+  });
+
+  socket.on('admin_join', ({ token }) => {
+    if (token && token === getAdminExpectedToken()) {
+      socket.join('admin_dashboard');
+      socket.emit('admin_rooms_update', roomManager.getAllRoomsSummary());
     }
   });
 
