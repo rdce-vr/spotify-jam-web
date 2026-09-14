@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { socket } from './socket';
 import SetupView from './components/SetupView';
 import HostView from './components/HostView';
@@ -7,6 +7,7 @@ import AdminView from './components/AdminView';
 import { Music2, ArrowRight, ArrowLeft, AlertCircle, Sparkles } from 'lucide-react';
 
 export function App() {
+  const isEndingSessionRef = useRef(false);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(() => !window.location.pathname.startsWith('/room/'));
   const [room, setRoom] = useState(() => {
@@ -215,7 +216,9 @@ export function App() {
     };
 
     const handleRoomClosed = ({ reason }) => {
-      alert(`Session closed: ${reason || 'Room session ended by administrator'}`);
+      if (!isEndingSessionRef.current) {
+        alert(`Session closed: ${reason || 'Room session ended by administrator'}`);
+      }
       window.location.href = '/';
     };
 
@@ -473,6 +476,32 @@ export function App() {
     }
   };
 
+  const handleEndSession = async () => {
+    if (!roomCode) return;
+    isEndingSessionRef.current = true;
+    try {
+      const headers = {};
+      const activeKey = hostKey || localStorage.getItem(`jam_host_key_${roomCode}`);
+      if (activeKey) headers['x-host-key'] = activeKey;
+
+      await fetch(`/api/room/${roomCode}/close`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify({ reason: 'The host has ended the party session' })
+      });
+    } catch (err) {
+      console.warn('Failed to end session:', err);
+    } finally {
+      localStorage.removeItem(`jam_host_key_${roomCode}`);
+      localStorage.removeItem(`jam_host_pin_${roomCode}`);
+      sessionStorage.removeItem(`room_cache_${roomCode}`);
+      window.location.href = '/';
+    }
+  };
+
   const handleManualJoin = (e) => {
     e.preventDefault();
     const code = joinInputCode.trim().toUpperCase();
@@ -556,6 +585,7 @@ export function App() {
             actionLoading={playbackActionLoading}
             onSwitchToGuest={handleSwitchToGuest}
             onSync={handleSyncPlayback}
+            onEndSession={handleEndSession}
           />
         ) : (
           <div>

@@ -579,6 +579,19 @@ app.post('/api/room/:code/settings', (req, res) => {
 });
 
 /**
+ * Close / End Room Session (Host)
+ */
+app.post('/api/room/:code/close', (req, res) => {
+  const room = roomManager.getRoom(req.params.code);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  if (!verifyHostAuth(req, room)) return res.status(403).json({ error: 'Host privileges required' });
+
+  const reason = req.body?.reason || 'The host has ended the party session';
+  roomManager.closeRoom(req.params.code, reason);
+  res.json({ success: true, message: 'Session ended successfully' });
+});
+
+/**
  * ==================== HOST PLAYBACK CONTROLS ====================
  */
 

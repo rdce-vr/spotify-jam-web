@@ -17,7 +17,8 @@ import {
   Key,
   ShieldAlert,
   Smartphone,
-  Eye
+  Eye,
+  Power
 } from 'lucide-react';
 import NowPlaying from './NowPlaying';
 import QueueItem from './QueueItem';
@@ -39,7 +40,8 @@ export function HostView({
   onPrevious,
   actionLoading,
   onSwitchToGuest,
-  onSync
+  onSync,
+  onEndSession
 }) {
   const effectivePin = hostPin || room.hostPin || '';
   const [devices, setDevices] = useState([]);
@@ -48,6 +50,8 @@ export function HostView({
   const [copied, setCopied] = useState(false);
   const [copiedHostLink, setCopiedHostLink] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
+  const [showEndSessionModal, setShowEndSessionModal] = useState(false);
+  const [endingSession, setEndingSession] = useState(false);
   const [qrTab, setQrTab] = useState('guest'); // 'guest' or 'host'
   const [hostQrData, setHostQrData] = useState(null);
   const [loadingHostQr, setLoadingHostQr] = useState(false);
@@ -256,6 +260,17 @@ export function HostView({
             {copied ? <Check className="w-4 h-4 stroke-[2.5]" /> : <Share2 className="w-4 h-4 stroke-[2.5]" />}
             <span>{copied ? 'Copied!' : 'Share Link'}</span>
           </button>
+
+          {onEndSession && (
+            <button
+              onClick={() => setShowEndSessionModal(true)}
+              title="End this party session and disconnect all guests"
+              className="flex items-center gap-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 text-xs font-semibold px-3 py-2 rounded-xl transition-colors"
+            >
+              <Power className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">End Session</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -624,6 +639,52 @@ export function HostView({
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* End Session Confirmation Modal */}
+      {showEndSessionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="glass-panel max-w-sm w-full rounded-2xl p-6 border border-red-500/30 text-center shadow-2xl relative">
+            <div className="w-12 h-12 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mx-auto mb-4 border border-red-500/30">
+              <Power className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-2">End Party Session?</h3>
+            <p className="text-xs text-neutral-400 mb-6 leading-relaxed">
+              Are you sure you want to end session <span className="font-mono font-bold text-white">{room.code}</span>? All guests will be disconnected and the room will be permanently closed.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowEndSessionModal(false)}
+                disabled={endingSession}
+                className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold transition-colors border border-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setEndingSession(true);
+                  try {
+                    await onEndSession();
+                  } catch (e) {
+                    setEndingSession(false);
+                    setShowEndSessionModal(false);
+                  }
+                }}
+                disabled={endingSession}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-bold transition-colors shadow-lg shadow-red-600/30 flex items-center justify-center gap-1.5"
+              >
+                {endingSession ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Ending...</span>
+                  </>
+                ) : (
+                  <span>End Session</span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
